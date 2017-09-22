@@ -22,8 +22,7 @@
     "pug": "^2.0.0-rc.4",
     "vinyl-buffer": "^1.0.0",
     "vinyl-source-stream": "^1.1.0",
-    "watchify": "^3.9.0",
-    "weddell": "^0.7.3"
+    "watchify": "^3.9.0"
   },
   "keywords": [
     "weddell",
@@ -49,6 +48,7 @@
     ]
   },
   "dependencies": {
+    "weddell": "^0.8.1",
     "array-compact": "^1.0.0",
     "del": "^3.0.0",
     "mkdirp": "^0.5.1",
