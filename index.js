@@ -41,18 +41,23 @@ class WeddellStaticSiteGenerator {
                 throw err;
             })
             .then(() => {
-                return Promise.all(this.router.routes.map(route => this.compileRoutes(outputPath, route)));
-            }, err => {
-                throw err;
+                return Promise.all(this.router.routes.map(route => this.compileRoutes(outputPath, route)))
+                    .catch(err => {
+                        console.error(err, err.stack || '');
+                        process.exit(1);
+                    });
             });
     }
 
     resolveTemplateFunction(templateFilePath) {
-        return (this.constructor.compiledTemplates[templateFilePath] ? this.constructor.compiledTemplates[templateFilePath] : this.constructor.compiledTemplates[templateFilePath] = fs.readFile(templateFilePath, {encoding:'utf8'}))
+        if (!this.constructor.compiledTemplates[templateFilePath]) {
+            this.constructor.compiledTemplates[templateFilePath] = fs.readFile(templateFilePath, {encoding:'utf8'});
+        }
+        return this.constructor.compiledTemplates[templateFilePath]
             .then(function(contents){
                 return pug.compile(contents, {filename: templateFilePath});
             }, err => {
-                throw err;
+                console.error(err)
             });
     }
 
@@ -92,22 +97,19 @@ class WeddellStaticSiteGenerator {
     }
 
     resolveTemplatePath(componentName) {
-        if (componentName) {
-            return this.templateMap[componentName];
-        } else {
-            return this.defaultTemplatePath;
-        }
+        return (componentName && this.templateMap[componentName]) || this.defaultTemplatePath;
     }
 
     writeFile(route, finalPath, locals, params) {
-        var handler = route.handler ? (typeof route.handler === 'function' ? route.handler.call(this.router, params) : route.handler) : null;
-        var redirect = route.redirect ? (typeof route.redirect === 'function' ? route.redirect.call(this.router, params) : route.redirect) : null;
+        var handler = route.handler ? (typeof route.handler === 'function' ? route.handler.call(this.router, {paramVals: params}) : route.handler) : null;
+        var redirect = route.redirect ? (typeof route.redirect === 'function' ? route.redirect.call(this.router, {paramVals: params}) : route.redirect) : null;
 
         return Promise.resolve(handler)
             .then(componentName => {
-                return this.resolveTemplatePath(componentName);
+                var templatePath = this.resolveTemplatePath(componentName);
+                return templatePath ? templatePath : Promise.reject("Could not resolve a template path for component: " + componentName);
             }, err => {
-                throw err;
+                console.error("Error in promise:", err)
             })
             .then(templatePath => {
                 return this.resolveTemplateFunction(templatePath)
@@ -118,13 +120,11 @@ class WeddellStaticSiteGenerator {
                                     locals = Object.assign({redirectTo: redirect}, locals);
                                     console.log('Notice: routes define redirect from', finalPath, 'to named route "', redirect, '." You will need to respond to the "redirectTo" property in your template to handle the actual redirection.');
                                 }
-                            }, err => {throw err})
-                            .then(() => {
                                 return templateFunc(locals);
-                            }, err => {throw err});
-                    }, err => {throw err})
+                            }, err => { console.error("Error in promise:", err) })
+                    }, err => { console.error("Error in promise:", err)})
                     .then(function(output) {
-                        var filePath = path.format({ base: 'index.html', dir: finalPath });
+                        var filePath = path.join(finalPath, 'index.html');
                         console.log('Writing file', filePath);
                         return mkdirp(finalPath)
                             .then(() => fs.writeFile(filePath, output))
@@ -132,11 +132,11 @@ class WeddellStaticSiteGenerator {
                                 console.log('Wrote file', filePath);
                                 return result;
                             }, err => {
-                                throw err;
+                                 console.error("Error in promise:", err);
                             })
-                    }, err => {throw err});
+                    }, err => { console.error("Error in promise:", err)});
             }, err => {
-                throw err;
+                console.error("Error in promise:", err)
             });
     }
 
@@ -168,7 +168,7 @@ class WeddellStaticSiteGenerator {
                                     });
                             }))
                         }, err => {
-                            throw err;
+                            console.error(err);
                         });
                 } else {
                     throw "No token name in path param '" + currToken + "'";
@@ -192,7 +192,6 @@ class WeddellStaticSiteGenerator {
                 throw "Failed compiling URL for route " + route.name + " " + err.toString();
                 return Promise.reject(err);
             }
-
             return this.writeFile(route, fullPath, locals, params)
                 .then(result => {
                     if (route.children) {
