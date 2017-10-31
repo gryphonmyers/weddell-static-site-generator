@@ -5,10 +5,34 @@ var fs = require('mz/fs');
 var path = require('path');
 var del = require('del');
 var mkdirp = require('mkdirp-then');
+var colors = require('colors');
 
 var defaultPugOpts = {
     pretty: false
 };
+
+
+function parseTime(timestamp) {
+    var date = new Date(timestamp);
+
+    var hours = Math.floor(timestamp / 1000 / 60 / 60);
+    timestamp -= hours * 1000 * 60 * 60;
+
+    var mins = Math.floor(timestamp / 1000 / 60);
+    timestamp -= mins * 1000 * 60;
+
+    var secs = Math.floor(timestamp / 1000);
+
+    return hours + ':' + mins + ':' + secs;
+}
+
+class Job {
+    constructor() {
+        this.redirects = [];
+        this.filesToWrite = 0;
+        this.filesWritten = 0;
+    }
+}
 
 class WeddellStaticSiteGenerator {
 
@@ -26,24 +50,39 @@ class WeddellStaticSiteGenerator {
         this.locals = opts.locals;
     }
 
-    compileRoutes(outputPath, route, locals, params){
+    compileRoutes(outputPath, route, locals, params, jobObj){
         if (!locals) locals = Object.assign({}, this.locals);
         if (!params) params = {};
 
         var parsed = pathToRegexp.parse(route.pattern);
 
-        return this.buildEntries(parsed, locals, route, null, outputPath, params);
+        return this.buildEntries(parsed, locals, route, null, outputPath, params, jobObj);
     }
 
     buildSite(outputPath) {
+        var startTime = Date.now();
         return del(outputPath)
             .then(() => mkdirp(outputPath), err => {
                 throw err;
             })
             .then(() => {
-                return Promise.all(this.router.routes.map(route => this.compileRoutes(outputPath, route)))
+                var jobObj = new Job;
+                return Promise.all(this.router.routes.map(route => this.compileRoutes(outputPath, route, null, null, jobObj)))
+                    .then(result => {
+                        console.log(colors.green("Done building site!"), "Job completed in " + colors.magenta(parseTime(Date.now() - startTime)), "Wrote " + jobObj.filesWritten + " files");
+                        if (jobObj.redirects.length) {
+                            console.warn(colors.yellow('Notice: some routes define redirects. You will need to respond to the "redirectTo" in the following templates in order to handle the actual redirection.'));
+                            var templates = jobObj.redirects.reduce((finalObj, redirectObj) => {
+                                if (!(redirectObj.templatePath in finalObj)) {
+                                    finalObj[redirectObj.templatePath] = 1;
+                                }
+                                return finalObj;
+                            }, {});
+                            console.log(Object.keys(templates).map(template => '\t' + colors.magenta(template)).join('\r\n'));
+                        }
+                    })
                     .catch(err => {
-                        console.error(err, err.stack || '');
+                        console.error(colors.red(err), err.stack || '');
                         process.exit(1);
                     });
             });
@@ -57,7 +96,7 @@ class WeddellStaticSiteGenerator {
             .then(function(contents){
                 return pug.compile(contents, {filename: templateFilePath});
             }, err => {
-                console.error(err)
+                throw err;
             });
     }
 
@@ -100,7 +139,7 @@ class WeddellStaticSiteGenerator {
         return (componentName && this.templateMap[componentName]) || this.defaultTemplatePath;
     }
 
-    writeFile(route, finalPath, locals, params) {
+    writeFile(route, finalPath, locals, params, jobObj) {
         var handler = route.handler ? (typeof route.handler === 'function' ? route.handler.call(this.router, {paramVals: params}) : route.handler) : null;
         var redirect = route.redirect ? (typeof route.redirect === 'function' ? route.redirect.call(this.router, {paramVals: params}) : route.redirect) : null;
 
@@ -108,8 +147,6 @@ class WeddellStaticSiteGenerator {
             .then(componentName => {
                 var templatePath = this.resolveTemplatePath(componentName);
                 return templatePath ? templatePath : Promise.reject("Could not resolve a template path for component: " + componentName);
-            }, err => {
-                console.error("Error in promise:", err)
             })
             .then(templatePath => {
                 return this.resolveTemplateFunction(templatePath)
@@ -118,29 +155,26 @@ class WeddellStaticSiteGenerator {
                             .then(redirect => {
                                 if (redirect) {
                                     locals = Object.assign({redirectTo: redirect}, locals);
-                                    console.log('Notice: routes define redirect from', finalPath, 'to named route "', redirect, '." You will need to respond to the "redirectTo" property in your template to handle the actual redirection.');
+                                    jobObj.redirects.push({from: finalPath, to: redirect, templatePath});
                                 }
                                 return templateFunc(locals);
-                            }, err => { console.error("Error in promise:", err) })
-                    }, err => { console.error("Error in promise:", err)})
+                            })
+                    })
                     .then(function(output) {
                         var filePath = path.join(finalPath, 'index.html');
-                        console.log('Writing file', filePath);
+                        console.log(colors.cyan('Writing file'), filePath);
                         return mkdirp(finalPath)
                             .then(() => fs.writeFile(filePath, output))
                             .then(result => {
-                                console.log('Wrote file', filePath);
+                                jobObj.filesWritten++;
+                                console.log(colors.green('Wrote file'), filePath);
                                 return result;
-                            }, err => {
-                                 console.error("Error in promise:", err);
                             })
-                    }, err => { console.error("Error in promise:", err)});
-            }, err => {
-                console.error("Error in promise:", err)
+                    });
             });
     }
 
-    buildEntries(tokens, locals, route, pathArr, outputPath, params) {
+    buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj) {
         if (!pathArr) pathArr = [];
 
         var currToken = tokens.length === pathArr.length ? null : tokens[pathArr.length];
@@ -162,19 +196,15 @@ class WeddellStaticSiteGenerator {
 
                                 return this.resolvePathSegment(currToken.name, route.name, entryLocals)
                                     .then(pathSegment => {
-                                        return this.buildEntries(tokens, entryLocals, route, pathArr.concat(pathSegment), outputPath, params);
-                                    }, err => {
-                                        throw err;
+                                        return this.buildEntries(tokens, entryLocals, route, pathArr.concat(pathSegment), outputPath, params, jobObj);
                                     });
                             }))
-                        }, err => {
-                            console.error(err);
                         });
                 } else {
                     throw "No token name in path param '" + currToken + "'";
                 }
             } else if (typeof currToken === 'string'){
-                return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params);
+                return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj);
             }
         } else {
             if (!route.name) throw "Route does not have a name - routes need names to be used with the static site generator: " + route.pattern;
@@ -190,18 +220,15 @@ class WeddellStaticSiteGenerator {
                 var fullPath = path.join(outputPath, this.router.compileRouterLink({name: route.name, params }).fullPath)
             } catch (err) {
                 throw "Failed compiling URL for route " + route.name + " " + err.toString();
-                return Promise.reject(err);
             }
-            return this.writeFile(route, fullPath, locals, params)
+
+            jobObj.filesToWrite++;
+
+            return this.writeFile(route, fullPath, locals, params, jobObj)
                 .then(result => {
                     if (route.children) {
-                        return Promise.all(route.children.map(childRoute => this.compileRoutes(outputPath, childRoute, locals, params)))
-                            .catch(err => {
-                                throw err;
-                            });
+                        return Promise.all(route.children.map(childRoute => this.compileRoutes(outputPath, childRoute, locals, params, jobObj)));
                     }
-                }, err => {
-                    throw err;
                 });
         }
     }
