@@ -1,6 +1,6 @@
 {
   "name": "weddell-static-site-generator",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Generate a static site from a Weddell router object.",
   "main": "index.js",
   "scripts": {
