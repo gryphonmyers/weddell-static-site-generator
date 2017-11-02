@@ -48,6 +48,7 @@ class WeddellStaticSiteGenerator {
         this.defaultPathSegmentResolver = opts.defaultPathSegmentResolver;
         this.defaultEntryLocalNameResolver = opts.defaultEntryLocalNameResolver;
         this.locals = opts.locals;
+        this.clean = opts.clean;
     }
 
     compileRoutes(outputPath, route, locals, params, jobObj){
@@ -61,10 +62,10 @@ class WeddellStaticSiteGenerator {
 
     buildSite(outputPath) {
         var startTime = Date.now();
-        return del(outputPath)
+        return Promise.resolve(this.clean ? del(outputPath)
             .then(() => mkdirp(outputPath), err => {
                 throw err;
-            })
+            }) : null)
             .then(() => {
                 var jobObj = new Job;
                 return Promise.all(this.router.routes.map(route => this.compileRoutes(outputPath, route, null, null, jobObj)))
