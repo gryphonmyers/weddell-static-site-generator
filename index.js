@@ -265,19 +265,24 @@ class WeddellStaticSiteGenerator {
                     throw "No token name in path param '" + currToken + "'";
                 }
             } else if (typeof currToken === 'string'){
-                return Promise.all([
-                    this.buildEntry(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj),
-                    this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj)
-                ])
+                return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj);
             }
-        } else if (route.children) {
-            params = Object.assign({}, params, tokens.reduce((final, tok, ii) => {
-                if (typeof tok === 'object' && tok.name) {
-                    final[tok.name] = pathArr[ii];
-                }
-                return final;
-            }, {}));
-            return Promise.all(route.children.map(childRoute => this.compileRoute(outputPath, childRoute, locals, params, jobObj)));
+        } else {
+            var promises = [];
+            if (typeof tokens[tokens.length - 1] === 'string') {
+                promises.push(this.buildEntry(tokens, locals, route, pathArr, outputPath, params, jobObj))
+            }
+            
+            if (route.children) {
+                params = Object.assign({}, params, tokens.reduce((final, tok, ii) => {
+                    if (typeof tok === 'object' && tok.name) {
+                        final[tok.name] = pathArr[ii];
+                    }
+                    return final;
+                }, {}));
+                promises = promises.concat(route.children.map(childRoute => this.compileRoute(outputPath, childRoute, locals, params, jobObj)));
+            }
+            return Promise.all(promises);
         }
     }
 }
