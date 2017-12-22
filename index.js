@@ -162,6 +162,7 @@ class WeddellStaticSiteGenerator {
         return Promise.resolve(handler)
             .then(componentName => {
                 var templatePath = this.resolveTemplatePath(componentName);
+                Object.assign(locals, {componentName});
                 return templatePath ? templatePath : Promise.reject("Could not resolve a template path for component: " + componentName);
             })
             .then(templatePath => {
@@ -208,6 +209,7 @@ class WeddellStaticSiteGenerator {
             }
             return final;
         }, {}));
+        locals = Object.assign({routeName: route.name}, locals);
 
         try {
             var fullPath = this.router.compileRouterLink({name: route.name, params }).fullPath;
