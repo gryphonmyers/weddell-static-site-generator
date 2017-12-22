@@ -61,6 +61,7 @@ class WeddellStaticSiteGenerator {
         this.defaultPathSegmentResolver = opts.defaultPathSegmentResolver;
         this.defaultEntryLocalNameResolver = opts.defaultEntryLocalNameResolver;
         this.locals = opts.locals;
+        this.localsTransform = opts.localsTransform;
         this.clean = opts.clean;
     }
 
@@ -154,7 +155,7 @@ class WeddellStaticSiteGenerator {
         return (componentName && this.templateMap[componentName]) || this.defaultTemplatePath;
     }
 
-    writeFile(route, finalPath, locals, params, jobObj) {
+    writeFile(route, finalPath, locals, params, jobObj, outputPath) {
         var handler = route.handler ? (typeof route.handler === 'function' ? route.handler.call(this.router, {paramVals: params}) : route.handler) : null;
         var redirect = route.redirect ? (typeof route.redirect === 'function' ? route.redirect.call(this.router, {paramVals: params}) : route.redirect) : null;
 
@@ -165,17 +166,22 @@ class WeddellStaticSiteGenerator {
             })
             .then(templatePath => {
                 return this.resolveTemplateFunction(templatePath)
-                    .then(function(templateFunc){
+                    .then((templateFunc) => {
                         return Promise.resolve(redirect)
                             .then(redirect => {
+                                locals = Object.assign({ path: finalPath }, locals);
                                 if (redirect) {
-                                    locals = Object.assign({redirectTo: redirect}, locals);
+                                    locals = Object.assign(locals, {redirectTo: redirect});
                                     jobObj.redirects.push({from: finalPath, to: redirect, templatePath});
+                                }
+                                if (this.localsTransform) {
+                                    locals = this.localsTransform(locals);
                                 }
                                 return templateFunc(locals);
                             })
                     })
                     .then(function(output) {
+                        finalPath = path.join(outputPath, finalPath);
                         var filePath = path.join(finalPath, 'index.html');
                         if (this.logLevel >= 1) {
                             console.log(colors.cyan('Writing file'), filePath);
@@ -204,14 +210,14 @@ class WeddellStaticSiteGenerator {
         }, {}));
 
         try {
-            var fullPath = path.join(outputPath, this.router.compileRouterLink({name: route.name, params }).fullPath)
+            var fullPath = this.router.compileRouterLink({name: route.name, params }).fullPath;
         } catch (err) {
             throw "Failed compiling URL for route " + route.name + " " + err.toString();
         }
 
         jobObj.filesToWrite++;
 
-        return this.writeFile(route, fullPath, locals, params, jobObj)
+        return this.writeFile(route, fullPath, locals, params, jobObj, outputPath)
     }
 
     buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj) {
