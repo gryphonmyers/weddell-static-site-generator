@@ -164,6 +164,13 @@ class WeddellStaticSiteGenerator {
                 var templatePath = this.resolveTemplatePath(componentName);
                 Object.assign(locals, {componentName});
                 return templatePath ? templatePath : Promise.reject("Could not resolve a template path for component: " + componentName);
+            }, err => {
+                if (err && typeof err === 'object' ) {
+                    redirect = this.router.compileRouterLink(Object.assign({}, err, {params: Object.assign({}, locals, err.params)})).fullPath;
+                } else if (err && typeof err === 'string') {
+                    redirect = err;
+                }
+                return this.resolveTemplatePath(null);
             })
             .then(templatePath => {
                 return this.resolveTemplateFunction(templatePath)
