@@ -6,7 +6,7 @@ var path = require('path');
 var del = require('del');
 var mkdirp = require('mkdirp-then');
 var colors = require('colors');
-var defaults = require('lodash/defaults');
+var defaults = require('lodash/defaultsDeep');
 
 var defaultPugOpts = {
     pretty: false
@@ -51,6 +51,7 @@ class WeddellStaticSiteGenerator {
         opts = defaults(opts, defaultOpts);
         this.logLevel = logLevels[opts.logLevel];
         this.entryResolvers = opts.entryResolvers;
+        this.pugOpts = defaults(opts.pugOpts, defaultPugOpts);
         this.pathSegmentResolvers = opts.pathSegmentResolvers;
         this.routes = opts.routes;
         this.router = new Router({ routes: this.routes });
@@ -109,8 +110,8 @@ class WeddellStaticSiteGenerator {
             this.constructor.compiledTemplates[templateFilePath] = fs.readFile(templateFilePath, {encoding:'utf8'});
         }
         return this.constructor.compiledTemplates[templateFilePath]
-            .then(function(contents){
-                return pug.compile(contents, {filename: templateFilePath});
+            .then((contents) => {
+                return pug.compile(contents, defaults({filename: templateFilePath}, this.pugOpts));
             }, err => {
                 throw err;
             });
@@ -177,7 +178,7 @@ class WeddellStaticSiteGenerator {
                     .then((templateFunc) => {
                         return Promise.resolve(redirect)
                             .then(redirect => {
-                                locals = Object.assign({ path: finalPath }, locals);
+                                locals = Object.assign({ path: finalPath, route, router: this.router, params }, locals);
                                 if (redirect) {
                                     locals = Object.assign(locals, {redirectTo: redirect});
                                     jobObj.redirects.push({from: finalPath, to: redirect, templatePath});
