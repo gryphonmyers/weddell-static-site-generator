@@ -251,7 +251,13 @@ class WeddellStaticSiteGenerator {
             throw "Failed compiling URL for route " + route.name + " " + err.toString();
         }
 
-        jobObj.enqueue(fullPath, routeIndex, depth, this.writeFile.bind(this, route, fullPath, locals, params, jobObj, outputPath));
+        var matches = this.router.matchRoute(fullPath, this.routes);
+        
+        if (matches) {
+            if (matches[matches.length - 1].route === route) {
+                jobObj.enqueue(fullPath, routeIndex, depth, this.writeFile.bind(this, route, fullPath, locals, params, jobObj, outputPath));
+            }
+        }
     }
 
     buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj, prevTokens, routeIndex, depth) {
@@ -307,9 +313,9 @@ class WeddellStaticSiteGenerator {
             }
         } else {
             var promises = [];
-            if (typeof tokens[tokens.length - 1] === 'string') {
-                promises.push(this.buildEntry(tokens, locals, route, pathArr, outputPath, params, jobObj, routeIndex, depth));
-            }
+            // if (typeof tokens[tokens.length - 1] === 'string') { Don't 100% remember why we were checking this. It was messing some things up.
+            promises.push(this.buildEntry(tokens, locals, route, pathArr, outputPath, params, jobObj, routeIndex, depth));
+            // }
             
             if (route.children) {
                 params = Object.assign({}, params, tokens.reduce((final, tok, ii) => {
