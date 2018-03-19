@@ -207,7 +207,10 @@ class WeddellStaticSiteGenerator {
                                     jobObj.redirects.push({from: finalPath, to: redirect, templatePath});
                                 }
                                 if (this.localsTransform) {
-                                    locals = this.localsTransform(locals);
+                                    return Promise.resolve(this.localsTransform(locals))
+                                        .then(locals => {
+                                            return templateFunc(locals);
+                                        });
                                 }
                                 return templateFunc(locals);
                             })
