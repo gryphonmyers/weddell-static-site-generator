@@ -194,7 +194,13 @@ class WeddellStaticSiteGenerator {
                 } else if (err && typeof err === 'string') {
                     redirect = err;
                 }
-                return this.resolveTemplatePath(null);
+                var redirectRoutes;
+                if (redirect && (redirectRoutes = this.router.matchRoute(redirect, this.routes))) {
+                    this.writeFile(redirectRoutes[redirectRoutes.length - 1].route, finalPath, locals, err.params, jobObj, outputPath);
+                } else {
+                    throw `Failed performing redirect: ${redirect}`;
+                }
+                return Promise.reject(redirect);
             })
             .then(templatePath => {
                 return this.resolveTemplateFunction(templatePath)
@@ -234,6 +240,10 @@ class WeddellStaticSiteGenerator {
                                 return result;
                             })
                     }.bind(this));
+            }, err => {
+                if (this.logLevel >= 1) {
+                    console.log(`Writing redirect: ${err}`);
+                }
             });
     }
 
