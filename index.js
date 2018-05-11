@@ -19,7 +19,8 @@ var logLevels = {
 };
 
 var defaultOpts = {
-    logLevel: 'normal'
+    logLevel: 'normal',
+    clean: true
 };
 
 function parseTime(timestamp) {
@@ -180,46 +181,47 @@ class WeddellStaticSiteGenerator {
     }
 
     writeFile(route, finalPath, locals, params, jobObj, outputPath) {
-        var handler = route.handler ? (typeof route.handler === 'function' ? route.handler.call(this.router, {paramVals: params}) : route.handler) : null;
-        var redirect = route.redirect ? (typeof route.redirect === 'function' ? route.redirect.call(this.router, {paramVals: params}) : route.redirect) : null;
-
-        return Promise.resolve(handler)
+        return (route.redirect ?
+                Promise.reject(typeof route.redirect === 'function' ? route.redirect.call(this.router, {paramVals: params}) : route.redirect) : 
+                route.handler ? Promise.resolve(typeof route.handler === 'function' ? route.handler.call(this.router, {paramVals: params}) : route.handler) : null
+            )
             .then(componentName => {
                 var templatePath = this.resolveTemplatePath(componentName);
                 Object.assign(locals, {componentName});
                 return templatePath ? templatePath : Promise.reject("Could not resolve a template path for component: " + componentName);
-            }, err => {
-                if (err && typeof err === 'object' ) {
-                    redirect = this.router.compileRouterLink(Object.assign({}, err, {params: Object.assign({}, locals, err.params)})).fullPath;
-                } else if (err && typeof err === 'string') {
-                    redirect = err;
+            }, rejection => {
+                if (rejection && typeof rejection === 'object' ) {
+                    try {
+                        var redirect = this.router.compileRouterLink(Object.assign({}, rejection, {params: Object.assign({}, locals, rejection.params)})).fullPath;
+                    } catch (err) {
+                        return new Error(`Failed compiling route for redirect:\n ${err}`);
+                    }                    
+                } else if (rejection && typeof rejection === 'string') {
+                    redirect = rejection;
                 }
                 var redirectRoutes;
+
                 if (redirect && (redirectRoutes = this.router.matchRoute(redirect, this.routes))) {
-                    this.writeFile(redirectRoutes[redirectRoutes.length - 1].route, finalPath, locals, err.params, jobObj, outputPath);
+                    jobObj.redirects.push({from: finalPath, to: redirect });
+                    locals = Object.assign(locals, {redirectTo: redirect});
+                    this.writeFile(redirectRoutes[redirectRoutes.length - 1].route, finalPath, locals, rejection.params, jobObj, outputPath);
                 } else {
-                    throw `Failed performing redirect: ${redirect}`;
+                    return new Error(`Failed performing redirect: ${redirect}`);
                 }
                 return Promise.reject(redirect);
             })
             .then(templatePath => {
                 return this.resolveTemplateFunction(templatePath)
                     .then((templateFunc) => {
-                        return Promise.resolve(redirect)
-                            .then(redirect => {
-                                locals = Object.assign({ path: finalPath, route, router: this.router, params }, locals);
-                                if (redirect) {
-                                    locals = Object.assign(locals, {redirectTo: redirect});
-                                    jobObj.redirects.push({from: finalPath, to: redirect, templatePath});
-                                }
-                                if (this.localsTransform) {
-                                    return Promise.resolve(this.localsTransform(locals))
-                                        .then(locals => {
-                                            return templateFunc(locals);
-                                        });
-                                }
-                                return templateFunc(locals);
-                            })
+                        locals = Object.assign({ path: finalPath, route, router: this.router, params }, locals);
+                        
+                        if (this.localsTransform) {
+                            return Promise.resolve(this.localsTransform(locals))
+                                .then(locals => {
+                                    return templateFunc(locals);
+                                });
+                        }
+                        return templateFunc(locals);
                     })
                     .then(function(output) {
                         var origPath = finalPath;
@@ -241,7 +243,9 @@ class WeddellStaticSiteGenerator {
                             })
                     }.bind(this));
             }, err => {
-                if (this.logLevel >= 1) {
+                if (err instanceof Error) {
+                    throw err;
+                } else if (this.logLevel >= 1) {
                     console.log(`Writing redirect: ${err}`);
                 }
             });
