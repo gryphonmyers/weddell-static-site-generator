@@ -7,6 +7,7 @@ var del = require('del');
 var mkdirp = require('mkdirp-then');
 var colors = require('colors');
 var defaults = require('lodash/defaultsDeep');
+var ProgressBar = require('progress');
 
 var defaultPugOpts = {
     pretty: false
@@ -40,24 +41,51 @@ function parseTime(timestamp) {
 class Job {
     constructor() {
         this.redirects = [];
-        this.numFilesToWrite = 0;
         this.numFilesWritten = 0;
         this.filesWritten = [];
         this.pathsWritten = [];
+        this.maxOpenFiles = 1024;
         this.queue = {};
     }
 
     enqueue(outputPath, routeIndex, depth, func) {
         var newObj = {routeIndex, depth, func};
         if (outputPath in this.queue) {
-            this.queue[outputPath] = this.queue[outputPath].depth > depth ? this.queue[outputPath] : this.queue[outputPath].depth < depth ? newObj : this.queue[outputPath].routeIndex > routeIndex ? this.queue[outputPath] : this.queue[outputPath].routeIndex < newObj ? newObj : newObj;
+            this.queue[outputPath] = this.queue[outputPath].depth > depth ? 
+                this.queue[outputPath] : 
+                this.queue[outputPath].depth < depth ? 
+                    newObj : 
+                    this.queue[outputPath].routeIndex > routeIndex ? 
+                        this.queue[outputPath] : 
+                        this.queue[outputPath].routeIndex < newObj ? 
+                            newObj : 
+                            newObj;
         } else {
             this.queue[outputPath] = newObj;
         }
     }
 
     write() {
-        return Promise.all(Object.values(this.queue).map(val => val.func()));
+        var bar = new ProgressBar(':bar :elapseds passed, ~:etas remaining ', { total: Object.keys(this.queue).length });
+        
+        var write = (toDo, numWriting=0) => {
+            if (toDo.length === 0) {
+                return Promise.resolve();
+            }
+            var numToWrite = this.maxOpenFiles - numWriting;
+            numWriting += numToWrite;
+            return Promise.all(
+                toDo.splice(0, numToWrite)
+                    .map(val => val.func()
+                        .then(() => {
+                            bar.tick();
+                            return write(toDo, numWriting - 1);
+                        })
+                    )
+            );
+        }
+
+        return write(Object.values(this.queue));
     }
 }
 
