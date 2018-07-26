@@ -50,6 +50,7 @@
   "dependencies": {
     "array-compact": "^1.0.0",
     "del": "^3.0.0",
+    "colors": "^1.3.1",
     "lodash": "^4.17.4",
     "mkdirp": "^0.5.1",
     "mkdirp-then": "^1.2.0",
