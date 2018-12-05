@@ -8,6 +8,7 @@ var mkdirp = require('mkdirp-then');
 var colors = require('colors');
 var defaults = require('lodash/defaultsDeep');
 var ProgressBar = require('progress');
+var crypto = require('crypto');
 
 var defaultPugOpts = {
     pretty: false
@@ -39,12 +40,15 @@ function parseTime(timestamp) {
 }
 
 class Job {
-    constructor() {
+    constructor(opts={}) {
         this.redirects = [];
         this.numFilesWritten = 0;
+        this.numFilesSkipped = 0;
         this.filesWritten = [];
+        this.filesSkipped = [];
         this.pathsWritten = [];
         this.maxOpenFiles = 1024;
+        this.hashes = opts.hashes || {};
         this.queue = {};
     }
 
@@ -123,12 +127,17 @@ class WeddellStaticSiteGenerator {
     buildSite(outputPath) {
         var startTime = Date.now();
         console.log(colors.cyan("Starting Weddell site build, please wait..."));
+    
         return Promise.resolve(this.clean ? del(outputPath)
             .then(() => mkdirp(outputPath), err => {
                 throw err;
             }) : null)
-            .then(() => {
-                var jobObj = new Job;
+            .then(async () => {
+                var hashes = await fs.readFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes'}))
+                    .then(val => JSON.parse(val))
+                    .catch(() => {});
+
+                var jobObj = new Job({hashes});
                 return Promise.all(this.router.routes.map((route, ii) => this.compileRoute(outputPath, route, null, null, jobObj, null, ii, 0)))
                     .then(result => {
                         var resolveTime = Date.now();
@@ -147,7 +156,8 @@ class WeddellStaticSiteGenerator {
                             .then(() => {
                                 var writeTime = Date.now();
                                 console.log("Done writing files in " + colors.magenta(parseTime(writeTime - resolveTime)) + ". Job took " + colors.magenta(parseTime(writeTime - startTime)) + " in total.");
-                                return jobObj;
+                                return fs.writeFile(path.format({dir: outputPath, base: '.weddellstaticsitehashes'}), JSON.stringify(jobObj.hashes))
+                                    .then(() => jobObj)
                             });
                     })
                     .catch(err => {
@@ -158,15 +168,12 @@ class WeddellStaticSiteGenerator {
     }
 
     resolveTemplateFunction(templateFilePath) {
-        if (!this.constructor.compiledTemplates[templateFilePath]) {
-            this.constructor.compiledTemplates[templateFilePath] = fs.readFile(templateFilePath, {encoding:'utf8'});
-        }
-        return this.constructor.compiledTemplates[templateFilePath]
+        return this.constructor.compiledTemplates[templateFilePath] || (this.constructor.compiledTemplates[templateFilePath] = fs.readFile(templateFilePath, {encoding:'utf8'})
             .then((contents) => {
-                return pug.compile(contents, defaults({filename: templateFilePath}, this.pugOpts));
-            }, err => {
-                throw err;
-            });
+                var func = pug.compile(contents, defaults({filename: templateFilePath}, this.pugOpts));
+                this.constructor.compiledTemplateHashes[templateFilePath] = crypto.createHash('md5').update(func.toString()).digest("hex");
+                return func;
+            }))     
     }
 
     resolveEntries(paramName, routeName, locals) {
@@ -239,37 +246,49 @@ class WeddellStaticSiteGenerator {
                 return Promise.reject(redirect);
             })
             .then(templatePath => {
+                
+                var fsFinalPath = path.join(outputPath, finalPath);
+                var filePath = path.format({dir: fsFinalPath, base: 'index.html'});
+
                 return this.resolveTemplateFunction(templatePath)
                     .then((templateFunc) => {
                         locals = Object.assign({ path: finalPath, route, router: this.router, params }, locals);
+
+                        var hash = crypto.createHash('md5').update(this.constructor.compiledTemplateHashes[templatePath] + '_' + JSON.stringify(locals)).digest("hex");
+
+                        if (jobObj.hashes[filePath] === hash) {
+                            jobObj.filesSkipped.push(filePath);
+                            jobObj.numFilesSkipped++;
+                            if (this.logLevel >= 1) {
+                                console.log(colors.green('Skipped file'), filePath);
+                            }
+                            return Promise.resolve(true);
+                        }
+
+                        jobObj.hashes[filePath] = hash;
                         
-                        if (this.localsTransform) {
-                            return Promise.resolve(this.localsTransform(locals))
-                                .then(locals => {
-                                    return templateFunc(locals);
-                                });
-                        }
-                        return templateFunc(locals);
-                    })
-                    .then(function(output) {
-                        var origPath = finalPath;
-                        finalPath = path.join(outputPath, finalPath);
-                        var filePath = path.join(finalPath, 'index.html');
-                        if (this.logLevel >= 1) {
-                            console.log(colors.cyan('Writing file'), filePath);
-                        }
-                        return mkdirp(finalPath)
-                            .then(() => fs.writeFile(filePath, output))
-                            .then(result => {
-                                jobObj.pathsWritten.push(origPath);
-                                jobObj.filesWritten.push(filePath);
-                                jobObj.numFilesWritten++;
-                                if (this.logLevel >= 1) {
-                                    console.log(colors.green('Wrote file'), filePath);
-                                }
-                                return result;
+                        return Promise.resolve(this.localsTransform ? this.localsTransform(locals) : locals)
+                            .then(locals => {
+                                return templateFunc(locals);
                             })
-                    }.bind(this));
+                            .then(output => {
+                                if (this.logLevel >= 1) {
+                                    console.log(colors.cyan('Writing file'), filePath);
+                                }
+                                
+                                return mkdirp(fsFinalPath)
+                                    .then(() => fs.writeFile(filePath, output))
+                                    .then(result => {
+                                        jobObj.pathsWritten.push(fsFinalPath);
+                                        jobObj.filesWritten.push(filePath);
+                                        jobObj.numFilesWritten++;
+                                        if (this.logLevel >= 1) {
+                                            console.log(colors.green('Wrote file'), filePath);
+                                        }
+                                        return result;
+                                    })
+                            })
+                    })
             }, err => {
                 if (err instanceof Error) {
                     throw err;
@@ -378,5 +397,7 @@ class WeddellStaticSiteGenerator {
 }
 
 WeddellStaticSiteGenerator.compiledTemplates = {};
+
+WeddellStaticSiteGenerator.compiledTemplateHashes = {};
 
 module.exports = WeddellStaticSiteGenerator;
