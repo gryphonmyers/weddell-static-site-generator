@@ -11,18 +11,6 @@
     "url": "git+https://github.com/gryphonmyers/weddell-static-site-generator.git"
   },
   "devDependencies": {
-    "babel-preset-es2015": "^6.24.1",
-    "babelify": "^7.3.0",
-    "browserify-transform-tools": "^1.7.0",
-    "del": "^3.0.0",
-    "gulp": "^3.9.1",
-    "gulp-if": "^2.0.2",
-    "gulp-rename": "^1.2.2",
-    "gulp-uglify": "^3.0.0",
-    "pug": "^2.0.0-rc.4",
-    "vinyl-buffer": "^1.0.0",
-    "vinyl-source-stream": "^1.1.0",
-    "watchify": "^3.9.0"
   },
   "keywords": [
     "weddell",
@@ -35,27 +23,13 @@
     "url": "https://github.com/gryphonmyers/weddell-static-site-generator/issues"
   },
   "homepage": "https://github.com/gryphonmyers/weddell-static-site-generator#readme",
-  "twokBuildSettings": {
-    "bundles": [
-      {
-        "jsEntry": "./index.js",
-        "bundleName": "weddell-static-site-generator",
-        "outputPath": "./dist",
-        "standaloneName": "WeddellStaticSiteGenerator",
-        "uglify": false,
-        "babelify": false
-      }
-    ]
-  },
   "dependencies": {
-    "array-compact": "^1.0.0",
     "del": "^3.0.0",
     "colors": "^1.3.1",
     "lodash": "^4.17.4",
     "mkdirp": "^0.5.1",
     "mkdirp-then": "^1.2.0",
     "mz": "^2.7.0",
-    "node-fetch": "^1.7.3",
     "progress": "^2.0.0",
     "pug": "^2.0.0-rc.4",
     "weddell": "^2.1.0"
