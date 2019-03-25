@@ -40,7 +40,7 @@ function parseTime(timestamp) {
 }
 
 class Job {
-    constructor(opts={}) {
+    constructor(opts = {}) {
         this.redirects = [];
         this.numFilesWritten = 0;
         this.numFilesSkipped = 0;
@@ -53,16 +53,16 @@ class Job {
     }
 
     enqueue(outputPath, routeIndex, depth, func) {
-        var newObj = {routeIndex, depth, func};
+        var newObj = { routeIndex, depth, func };
         if (outputPath in this.queue) {
-            this.queue[outputPath] = this.queue[outputPath].depth > depth ? 
-                this.queue[outputPath] : 
-                this.queue[outputPath].depth < depth ? 
-                    newObj : 
-                    this.queue[outputPath].routeIndex > routeIndex ? 
-                        this.queue[outputPath] : 
-                        this.queue[outputPath].routeIndex < newObj ? 
-                            newObj : 
+            this.queue[outputPath] = this.queue[outputPath].depth > depth ?
+                this.queue[outputPath] :
+                this.queue[outputPath].depth < depth ?
+                    newObj :
+                    this.queue[outputPath].routeIndex > routeIndex ?
+                        this.queue[outputPath] :
+                        this.queue[outputPath].routeIndex < newObj ?
+                            newObj :
                             newObj;
         } else {
             this.queue[outputPath] = newObj;
@@ -71,8 +71,8 @@ class Job {
 
     write() {
         var bar = new ProgressBar(':bar :elapseds passed, ~:etas remaining ', { total: Object.keys(this.queue).length });
-        
-        var write = (toDo, numWriting=0) => {
+
+        var write = (toDo, numWriting = 0) => {
             if (toDo.length === 0) {
                 return Promise.resolve();
             }
@@ -114,7 +114,7 @@ class WeddellStaticSiteGenerator {
         this.clean = opts.clean;
     }
 
-    compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth){
+    compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth) {
         if (!locals) locals = Object.assign({}, this.locals);
         if (!params) params = {};
         if (!prevTokens) prevTokens = []
@@ -127,17 +127,17 @@ class WeddellStaticSiteGenerator {
     buildSite(outputPath) {
         var startTime = Date.now();
         console.log(colors.cyan("Starting Weddell site build, please wait..."));
-    
+
         return Promise.resolve(this.clean ? del(outputPath)
             .then(() => mkdirp(outputPath), err => {
                 throw err;
             }) : null)
             .then(async () => {
-                var hashes = await fs.readFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes'}))
+                var hashes = await fs.readFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes' }))
                     .then(val => JSON.parse(val))
-                    .catch(() => {});
+                    .catch(() => { });
 
-                var jobObj = new Job({hashes});
+                var jobObj = new Job({ hashes });
                 return Promise.all(this.router.routes.map((route, ii) => this.compileRoute(outputPath, route, null, null, jobObj, null, ii, 0)))
                     .then(result => {
                         var resolveTime = Date.now();
@@ -156,7 +156,7 @@ class WeddellStaticSiteGenerator {
                             .then(() => {
                                 var writeTime = Date.now();
                                 console.log("Done writing files in " + colors.magenta(parseTime(writeTime - resolveTime)) + ". Job took " + colors.magenta(parseTime(writeTime - startTime)) + " in total.");
-                                return fs.writeFile(path.format({dir: outputPath, base: '.weddellstaticsitehashes'}), JSON.stringify(jobObj.hashes))
+                                return fs.writeFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes' }), JSON.stringify(jobObj.hashes))
                                     .then(() => jobObj)
                             });
                     })
@@ -168,19 +168,19 @@ class WeddellStaticSiteGenerator {
     }
 
     resolveTemplateFunction(templateFilePath) {
-        return this.constructor.compiledTemplates[templateFilePath] || (this.constructor.compiledTemplates[templateFilePath] = fs.readFile(templateFilePath, {encoding:'utf8'})
+        return this.constructor.compiledTemplates[templateFilePath] || (this.constructor.compiledTemplates[templateFilePath] = fs.readFile(templateFilePath, { encoding: 'utf8' })
             .then((contents) => {
-                var func = pug.compile(contents, defaults({filename: templateFilePath}, this.pugOpts));
+                var func = pug.compile(contents, defaults({ filename: templateFilePath }, this.pugOpts));
                 this.constructor.compiledTemplateHashes[templateFilePath] = crypto.createHash('md5').update(func.toString()).digest("hex");
                 return func;
-            }))     
+            }))
     }
 
     resolveEntries(paramName, routeName, locals) {
         var resolver = this._resolveProperty('entryResolvers', routeName, paramName, 'defaultEntryResolver');
         if (!resolver) throw "Failed to resolve entries for route " + routeName + " and param " + paramName;
 
-        return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals) : resolver);
+        return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals, routeName) : resolver);
     }
 
     _resolveProperty(prop, routeName, paramName, fallbackProp) {
@@ -217,28 +217,28 @@ class WeddellStaticSiteGenerator {
 
     writeFile(route, finalPath, locals, params, jobObj, outputPath) {
         return (route.redirect ?
-                Promise.reject(typeof route.redirect === 'function' ? route.redirect.call(this.router, {paramVals: params}) : route.redirect) : 
-                route.handler ? Promise.resolve(typeof route.handler === 'function' ? route.handler.call(this.router, {paramVals: params}) : route.handler) : null
-            )
+            Promise.reject(typeof route.redirect === 'function' ? route.redirect.call(this.router, { paramVals: params }) : route.redirect) :
+            route.handler ? Promise.resolve(typeof route.handler === 'function' ? route.handler.call(this.router, { paramVals: params }) : route.handler) : null
+        )
             .then(componentName => {
                 var templatePath = this.resolveTemplatePath(componentName);
-                Object.assign(locals, {componentName});
+                Object.assign(locals, { componentName });
                 return templatePath ? templatePath : Promise.reject("Could not resolve a template path for component: " + componentName);
             }, rejection => {
-                if (rejection && typeof rejection === 'object' ) {
+                if (rejection && typeof rejection === 'object') {
                     try {
-                        var redirect = this.router.compileRouterLink(Object.assign({}, rejection, {params: Object.assign({}, locals, rejection.params)})).fullPath;
+                        var redirect = this.router.compileRouterLink(Object.assign({}, rejection, { params: Object.assign({}, locals, rejection.params) })).fullPath;
                     } catch (err) {
                         return new Error(`Failed compiling route for redirect:\n ${err}`);
-                    }                    
+                    }
                 } else if (rejection && typeof rejection === 'string') {
                     redirect = rejection;
                 }
                 var redirectRoutes;
 
                 if (redirect && (redirectRoutes = this.router.matchRoute(redirect, this.routes))) {
-                    jobObj.redirects.push({from: finalPath, to: redirect });
-                    locals = Object.assign(locals, {redirectTo: redirect});
+                    jobObj.redirects.push({ from: finalPath, to: redirect });
+                    locals = Object.assign(locals, { redirectTo: redirect });
                     this.writeFile(redirectRoutes[redirectRoutes.length - 1].route, finalPath, locals, rejection.params, jobObj, outputPath);
                 } else {
                     return new Error(`Failed performing redirect: ${redirect}`);
@@ -246,9 +246,9 @@ class WeddellStaticSiteGenerator {
                 return Promise.reject(redirect);
             })
             .then(templatePath => {
-                
+
                 var fsFinalPath = path.join(outputPath, finalPath);
-                var filePath = path.format({dir: fsFinalPath, base: 'index.html'});
+                var filePath = path.format({ dir: fsFinalPath, base: 'index.html' });
 
                 return this.resolveTemplateFunction(templatePath)
                     .then((templateFunc) => {
@@ -266,7 +266,7 @@ class WeddellStaticSiteGenerator {
                         }
 
                         jobObj.hashes[filePath] = hash;
-                        
+
                         return Promise.resolve(this.localsTransform ? this.localsTransform(locals) : locals)
                             .then(locals => {
                                 return templateFunc(locals);
@@ -275,7 +275,7 @@ class WeddellStaticSiteGenerator {
                                 if (this.logLevel >= 1) {
                                     console.log(colors.cyan('Writing file'), filePath);
                                 }
-                                
+
                                 return mkdirp(fsFinalPath)
                                     .then(() => fs.writeFile(filePath, output))
                                     .then(result => {
@@ -300,23 +300,23 @@ class WeddellStaticSiteGenerator {
 
     buildEntry(tokens, locals, route, pathArr, outputPath, params, jobObj, routeIndex, depth) {
         if (!route.name) throw "Route does not have a name - routes need names to be used with the static site generator: " + route.pattern;
-        
+
         params = Object.assign({}, params, tokens.reduce((final, tok, ii) => {
             if (typeof tok === 'object' && tok.name) {
                 final[tok.name] = pathArr[ii];
             }
             return final;
         }, {}));
-        locals = Object.assign({routeName: route.name}, locals);
+        locals = Object.assign({ routeName: route.name }, locals);
 
         try {
-            var fullPath = this.router.compileRouterLink({name: route.name, params }).fullPath;
+            var fullPath = this.router.compileRouterLink({ name: route.name, params }).fullPath;
         } catch (err) {
             throw "Failed compiling URL for route " + route.name + " " + err.toString();
         }
 
         var matches = this.router.matchRoute(fullPath, this.routes);
-        
+
         if (matches) {
             if (matches[matches.length - 1].route === route) {
                 jobObj.enqueue(fullPath, routeIndex, depth, this.writeFile.bind(this, route, fullPath, locals, params, jobObj, outputPath));
@@ -334,9 +334,9 @@ class WeddellStaticSiteGenerator {
             if (typeof currToken === 'object') {
                 if (currToken.name) {
                     return Promise.all([
-                            this.resolveEntries(currToken.name, route.name, locals),
-                            this.resolveEntryLocalName(currToken.name, route.name, locals)
-                        ])
+                        this.resolveEntries(currToken.name, route.name, locals),
+                        this.resolveEntryLocalName(currToken.name, route.name, locals)
+                    ])
                         .then(result => {
                             var entries = result[0];
                             var entryLocalName = result[1];
@@ -354,25 +354,25 @@ class WeddellStaticSiteGenerator {
                                 return this.resolvePathSegment(currToken.name, route.name, entryLocals)
                                     .then(pathSegment => {
                                         entryLocals[currToken.name] = pathSegment;
-                                        return {locals: entryLocals, pathSegment};
+                                        return { locals: entryLocals, pathSegment };
                                     });
                             }))
-                            .then(entryObjs => {
-                                if (currToken.optional && !entryObjs.some(obj => !obj.locals[currToken.name])) {
-                                    var newObj = {};
-                                    newObj[currToken.name] = null;
-                                    entryObjs.push({locals: Object.assign(newObj, locals), pathSegment: null })   
-                                }
+                                .then(entryObjs => {
+                                    if (currToken.optional && !entryObjs.some(obj => !obj.locals[currToken.name])) {
+                                        var newObj = {};
+                                        newObj[currToken.name] = null;
+                                        entryObjs.push({ locals: Object.assign(newObj, locals), pathSegment: null })
+                                    }
 
-                                return Promise.all(entryObjs.map(obj => {
-                                    return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth)
-                                }));
-                            })
+                                    return Promise.all(entryObjs.map(obj => {
+                                        return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth)
+                                    }));
+                                })
                         });
                 } else {
                     throw "No token name in path param '" + currToken + "'";
                 }
-            } else if (typeof currToken === 'string'){
+            } else if (typeof currToken === 'string') {
                 return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj, prevTokens, routeIndex, depth);
             }
         } else {
@@ -380,7 +380,7 @@ class WeddellStaticSiteGenerator {
             // if (typeof tokens[tokens.length - 1] === 'string') { Don't 100% remember why we were checking this. It was messing some things up.
             promises.push(this.buildEntry(tokens, locals, route, pathArr, outputPath, params, jobObj, routeIndex, depth));
             // }
-            
+
             if (route.children) {
                 params = Object.assign({}, params, tokens.reduce((final, tok, ii) => {
                     if (typeof tok === 'object' && tok.name) {
