@@ -46,6 +46,7 @@ class Job {
         this.numFilesSkipped = 0;
         this.filesWritten = [];
         this.filesSkipped = [];
+        this.pathsSkipped = [];
         this.pathsWritten = [];
         this.maxOpenFiles = 1024;
         this.hashes = opts.hashes || {};
@@ -258,6 +259,7 @@ class WeddellStaticSiteGenerator {
 
                         if (jobObj.hashes[filePath] === hash) {
                             jobObj.filesSkipped.push(filePath);
+                            jobObj.pathsSkipped.push(fsFinalPath);
                             jobObj.numFilesSkipped++;
                             if (this.logLevel >= 1) {
                                 console.log(colors.green('Skipped file'), filePath);
