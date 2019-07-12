@@ -309,7 +309,7 @@ class WeddellStaticSiteGenerator {
             }
             return final;
         }, {}));
-        locals = Object.assign({ routeName: route.name }, locals);
+        locals = Object.assign({}, locals);
 
         try {
             var fullPath = this.router.compileRouterLink({ name: route.name, params }).fullPath;
@@ -329,6 +329,8 @@ class WeddellStaticSiteGenerator {
     buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj, prevTokens, routeIndex, depth) {
         if (!pathArr) pathArr = [];
         if (!locals) locals = {};
+
+        Object.assign(locals, { routeName: route.name });
 
         var currToken = tokens.length === pathArr.length ? null : tokens[pathArr.length];
 
