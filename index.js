@@ -125,6 +125,27 @@ class WeddellStaticSiteGenerator {
         return this.buildEntries(tokens, locals, route, null, outputPath, params, jobObj, prevTokens, routeIndex, depth);
     }
 
+    async buildRoute(route, outputPath) {
+        var startTime = Date.now();
+        console.log(colors.cyan("Starting Weddell site build, please wait..."));
+
+        var hashes = await fs.readFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes' }))
+            .then(val => JSON.parse(val))
+            .catch(() => { });
+
+        var jobObj = new Job({ hashes });
+
+        var matches = this.router.matchRoute(route, this.routes);
+        // console.log(matches[0]);
+
+        this.compileRoute(outputPath, matches[0].route, null, null, jobObj, null, 1, 0).then(() => {
+            var resolveTime = Date.now();
+            console.log("Resolved " + colors.green(Object.keys(jobObj.queue).length) + " files to write in " + colors.magenta(parseTime(resolveTime - startTime)) + ". Starting file writes...");
+        }).catch(err => {
+            console.log(err);
+        });
+    }
+
     buildSite(outputPath) {
         var startTime = Date.now();
         console.log(colors.cyan("Starting Weddell site build, please wait..."));
