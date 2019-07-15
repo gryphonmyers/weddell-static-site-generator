@@ -100,6 +100,7 @@ class WeddellStaticSiteGenerator {
         opts = defaults(opts, defaultOpts);
         this.logLevel = logLevels[opts.logLevel];
         this.entryResolvers = opts.entryResolvers;
+        this.singleEntryResolvers = opts.singleEntryResolvers;
         this.pugOpts = defaults(opts.pugOpts, defaultPugOpts);
         this.pathSegmentResolvers = opts.pathSegmentResolvers;
         this.routes = opts.routes;
@@ -136,13 +137,27 @@ class WeddellStaticSiteGenerator {
         var jobObj = new Job({ hashes });
 
         var matches = this.router.matchRoute(route, this.routes);
-        // console.log(matches[0]);
+        const children = matches[0].route.children.find(child => {
+            if (child.name === 'newsEntry') {
+                return child;
+            }
+        })
+        const newRoute = {...matches[0].route};
+        newRoute.children = [children];
 
-        this.compileRoute(outputPath, matches[0].route, null, null, jobObj, null, 1, 0).then(() => {
+        this.compileRoute(outputPath, newRoute, null, null, jobObj, null, 1, 0).then(() => {
             var resolveTime = Date.now();
             console.log("Resolved " + colors.green(Object.keys(jobObj.queue).length) + " files to write in " + colors.magenta(parseTime(resolveTime - startTime)) + ". Starting file writes...");
+            return jobObj.write()
+                .then(() => {
+                    var writeTime = Date.now();
+                    console.log("Done writing files in " + colors.magenta(parseTime(writeTime - resolveTime)) + ". Job took " + colors.magenta(parseTime(writeTime - startTime)) + " in total.");
+                    return fs.writeFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes' }), JSON.stringify(jobObj.hashes))
+                        .then(() => jobObj)
+                });
         }).catch(err => {
-            console.log(err);
+            console.error(colors.red(err), err.stack || '');
+            process.exit(1);
         });
     }
 
@@ -200,6 +215,13 @@ class WeddellStaticSiteGenerator {
 
     resolveEntries(paramName, routeName, locals) {
         var resolver = this._resolveProperty('entryResolvers', routeName, paramName, 'defaultEntryResolver');
+        if (!resolver) throw "Failed to resolve entries for route " + routeName + " and param " + paramName;
+
+        return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals, routeName) : resolver);
+    }
+
+    resolveSingleEntries(paramName, routeName, locals) {
+        var resolver = this._resolveProperty('singleEntryResolvers', routeName, paramName, 'defaultEntryResolver');
         if (!resolver) throw "Failed to resolve entries for route " + routeName + " and param " + paramName;
 
         return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals, routeName) : resolver);
@@ -359,7 +381,7 @@ class WeddellStaticSiteGenerator {
             if (typeof currToken === 'object') {
                 if (currToken.name) {
                     return Promise.all([
-                        this.resolveEntries(currToken.name, route.name, locals),
+                        this.resolveSingleEntries(currToken.name, route.name, locals),
                         this.resolveEntryLocalName(currToken.name, route.name, locals)
                     ])
                         .then(result => {
