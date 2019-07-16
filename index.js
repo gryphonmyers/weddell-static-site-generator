@@ -116,14 +116,14 @@ class WeddellStaticSiteGenerator {
         this.clean = opts.clean;
     }
 
-    compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter = () => true) {
+    compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth, paramVals, routeChildrenFilter = () => true) {
         if (!locals) locals = Object.assign({}, this.locals);
         if (!params) params = {};
         if (!prevTokens) prevTokens = []
 
         var tokens = pathToRegexp.parse(route.pattern);
 
-        return this.buildEntries(tokens, locals, route, null, outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter);
+        return this.buildEntries(tokens, locals, route, null, outputPath, params, jobObj, prevTokens, routeIndex, depth, paramVals, routeChildrenFilter);
     }
 
     async buildRoute(routeArg, outputPath) {
@@ -140,14 +140,13 @@ class WeddellStaticSiteGenerator {
 
         const routeChildrenFilter = function(child) {
             const parentIndex = matches.findIndex((match) => {
-                // console.log('match ', match.route, ' this ', this, ' match === this ', match.route === this);
                 return match.route === this;
             });
 
             return child === matches[parentIndex + 1].route;
         };
 
-        this.compileRoute(outputPath, matches[0].route, null, null, jobObj, null, 0, 0, routeArg, routeChildrenFilter).then(() => {
+        this.compileRoute(outputPath, matches[0].route, null, null, jobObj, null, 0, 0, matches.paramVals, routeChildrenFilter).then(() => {
             var resolveTime = Date.now();
             console.log("Resolved " + colors.green(Object.keys(jobObj.queue).length) + " files to write in " + colors.magenta(parseTime(resolveTime - startTime)) + ". Starting file writes...");
             return jobObj.write()
@@ -221,11 +220,11 @@ class WeddellStaticSiteGenerator {
         return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals, routeName) : resolver);
     }
 
-    resolveSingleEntries(paramName, routeName, locals, routeArg) {
+    resolveSingleEntries(paramName, routeName, locals, paramVals) {
         var resolver = this._resolveProperty('singleEntryResolvers', routeName, paramName, 'defaultEntryResolver');
         if (!resolver) throw "Failed to resolve entries for route " + routeName + " and param " + paramName;
 
-        return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals, routeName, routeArg) : resolver);
+        return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals, routeName, paramVals) : resolver);
     }
 
     _resolveProperty(prop, routeName, paramName, fallbackProp) {
@@ -370,7 +369,7 @@ class WeddellStaticSiteGenerator {
         }
     }
 
-    buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter = () => true) {
+    buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj, prevTokens, routeIndex, depth, paramVals, routeChildrenFilter = () => true) {
         if (!pathArr) pathArr = [];
         if (!locals) locals = {};
 
@@ -382,15 +381,14 @@ class WeddellStaticSiteGenerator {
             if (typeof currToken === 'object') {
                 if (currToken.name) {
                     return Promise.all([
-                        routeArg ?
-                            this.resolveSingleEntries(currToken.name, route.name, locals, routeArg) :
+                        paramVals ?
+                            this.resolveSingleEntries(currToken.name, route.name, locals, paramVals) :
                             this.resolveEntries(currToken.name, route.name, locals),
                         this.resolveEntryLocalName(currToken.name, route.name, locals)
                     ])
                         .then(result => {
                             var entries = result[0];
                             var entryLocalName = result[1];
-                            // console.log(entries, entryLocalName);
                             if (!entries || !entryLocalName) {
                                 throw "Missing entries or entry local name for param '" + currToken.name + "'";
                             }
@@ -416,7 +414,7 @@ class WeddellStaticSiteGenerator {
                                     }
 
                                     return Promise.all(entryObjs.map(obj => {
-                                        return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter);
+                                        return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth, paramVals, routeChildrenFilter);
                                     }));
                                 })
                         });
@@ -424,7 +422,7 @@ class WeddellStaticSiteGenerator {
                     throw "No token name in path param '" + currToken + "'";
                 }
             } else if (typeof currToken === 'string') {
-                return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter);
+                return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj, prevTokens, routeIndex, depth, paramVals, routeChildrenFilter);
             }
         } else {
             var promises = [];
