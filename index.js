@@ -116,15 +116,14 @@ class WeddellStaticSiteGenerator {
         this.clean = opts.clean;
     }
 
-    compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth, routeArg) {
-        console.log(routeArg);
+    compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter = () => true) {
         if (!locals) locals = Object.assign({}, this.locals);
         if (!params) params = {};
         if (!prevTokens) prevTokens = []
 
         var tokens = pathToRegexp.parse(route.pattern);
 
-        return this.buildEntries(tokens, locals, route, null, outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg);
+        return this.buildEntries(tokens, locals, route, null, outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter);
     }
 
     async buildRoute(routeArg, outputPath) {
@@ -138,16 +137,17 @@ class WeddellStaticSiteGenerator {
         var jobObj = new Job({ hashes });
 
         var matches = this.router.matchRoute(routeArg, this.routes);
-        // console.log(matches);
-        const children = matches[0].route.children.find(child => {
-            if (child.name === 'newsEntry') {
-                return child;
-            }
-        })
-        const newRoute = {...matches[0].route};
-        newRoute.children = [children];
 
-        this.compileRoute(outputPath, newRoute, null, null, jobObj, null, 1, 0, routeArg).then(() => {
+        const routeChildrenFilter = function(child) {
+            const parentIndex = matches.findIndex((match) => {
+                // console.log('match ', match.route, ' this ', this, ' match === this ', match.route === this);
+                return match.route === this;
+            });
+
+            return child === matches[parentIndex + 1].route;
+        };
+
+        this.compileRoute(outputPath, matches[0].route, null, null, jobObj, null, 0, 0, routeArg, routeChildrenFilter).then(() => {
             var resolveTime = Date.now();
             console.log("Resolved " + colors.green(Object.keys(jobObj.queue).length) + " files to write in " + colors.magenta(parseTime(resolveTime - startTime)) + ". Starting file writes...");
             return jobObj.write()
@@ -370,10 +370,9 @@ class WeddellStaticSiteGenerator {
         }
     }
 
-    buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg) {
+    buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter = () => true) {
         if (!pathArr) pathArr = [];
         if (!locals) locals = {};
-        // console.log(routeArg);
 
         Object.assign(locals, { routeName: route.name });
 
@@ -383,9 +382,9 @@ class WeddellStaticSiteGenerator {
             if (typeof currToken === 'object') {
                 if (currToken.name) {
                     return Promise.all([
-                        // routeArg ?
-                            // this.resolveSingleEntries(currToken.name, route.name, locals, routeArg) :
-                            this.resolveEntryLocalName(currToken.name, route.name, locals),
+                        routeArg ?
+                            this.resolveSingleEntries(currToken.name, route.name, locals, routeArg) :
+                            this.resolveEntries(currToken.name, route.name, locals),
                         this.resolveEntryLocalName(currToken.name, route.name, locals)
                     ])
                         .then(result => {
@@ -417,7 +416,7 @@ class WeddellStaticSiteGenerator {
                                     }
 
                                     return Promise.all(entryObjs.map(obj => {
-                                        return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg)
+                                        return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter);
                                     }));
                                 })
                         });
@@ -425,7 +424,7 @@ class WeddellStaticSiteGenerator {
                     throw "No token name in path param '" + currToken + "'";
                 }
             } else if (typeof currToken === 'string') {
-                return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg);
+                return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj, prevTokens, routeIndex, depth, routeArg, routeChildrenFilter);
             }
         } else {
             var promises = [];
@@ -440,7 +439,7 @@ class WeddellStaticSiteGenerator {
                     }
                     return final;
                 }, {}));
-                promises = promises.concat(route.children.map((childRoute, ii) => this.compileRoute(outputPath, childRoute, locals, params, jobObj, prevTokens.concat(tokens), ii, depth + 1)));
+                promises = promises.concat(route.children.filter(routeChildrenFilter.bind(route)).map((childRoute, ii) => this.compileRoute(outputPath, childRoute, locals, params, jobObj, prevTokens.concat(tokens), ii, depth + 1)));
             }
             return Promise.all(promises)
                 .then(() => jobObj);
