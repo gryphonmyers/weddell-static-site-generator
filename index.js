@@ -225,6 +225,7 @@ class WeddellStaticSiteGenerator {
     resolveSingleEntries(paramName, routeName, locals, paramVals) {
         var resolver = this._resolveProperty('singleEntryResolvers', routeName, paramName, 'defaultEntryResolver');
         if (!resolver) throw "Failed to resolve entries for route " + routeName + " and param " + paramName;
+        console.log(resolver.call(this, locals, routeName, paramVals));
 
         return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals, routeName, paramVals) : resolver);
     }
@@ -330,10 +331,7 @@ class WeddellStaticSiteGenerator {
                                     if (this.logLevel >= 1) {
                                         console.log(colors.green('Wrote file'), filePath);
                                     }
-                                    const stream = new stream.Readable();
-                                    stream.push(output);
-                                    console.log(stream);
-                                    return stream;
+                                    return output;
                                 }
 
                                 return mkdirp(fsFinalPath)
@@ -407,6 +405,8 @@ class WeddellStaticSiteGenerator {
                             if (!entries || !entryLocalName) {
                                 throw "Missing entries or entry local name for param '" + currToken.name + "'";
                             }
+
+                            entries = buildSingleRoute ? [entries] : entries;
 
                             return Promise.all(entries.map(entry => {
                                 var entryLocals = Object.assign({}, locals);
