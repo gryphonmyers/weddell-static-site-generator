@@ -49,6 +49,7 @@ class Job {
         this.pathsSkipped = [];
         this.pathsWritten = [];
         this.maxOpenFiles = 1024;
+        this.output = null;
         this.hashes = opts.hashes || {};
         this.queue = {};
     }
@@ -100,6 +101,7 @@ class WeddellStaticSiteGenerator {
         opts = defaults(opts, defaultOpts);
         this.logLevel = logLevels[opts.logLevel];
         this.entryResolvers = opts.entryResolvers;
+        this.singleEntryResolvers = opts.singleEntryResolvers;
         this.pugOpts = defaults(opts.pugOpts, defaultPugOpts);
         this.pathSegmentResolvers = opts.pathSegmentResolvers;
         this.routes = opts.routes;
@@ -115,14 +117,58 @@ class WeddellStaticSiteGenerator {
         this.clean = opts.clean;
     }
 
-    compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth) {
+    compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter = () => true, skipHash = false) {
         if (!locals) locals = Object.assign({}, this.locals);
         if (!params) params = {};
         if (!prevTokens) prevTokens = []
 
         var tokens = pathToRegexp.parse(route.pattern);
 
-        return this.buildEntries(tokens, locals, route, null, outputPath, params, jobObj, prevTokens, routeIndex, depth);
+        return this.buildEntries(tokens, locals, route, null, outputPath, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter, skipHash);
+    }
+
+    async buildRoute(routeArg, outputPath, skipHash = false) {
+        var startTime = Date.now();
+        var hashes = {};
+        console.log(colors.cyan("Starting Weddell site build, please wait..."));
+
+        if (!skipHash) {
+            hashes = await fs.readFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes' }))
+                .then(val => JSON.parse(val))
+                .catch(() => { });
+        }
+
+        var jobObj = new Job({ hashes });
+
+        var matches = this.router.matchRoute(routeArg, this.routes);
+
+        const routeChildrenFilter = function(child) {
+            const parentIndex = matches.findIndex((match) => {
+                return match.route === this;
+            });
+
+            return child === matches[parentIndex + 1].route;
+        };
+
+        return this.compileRoute(outputPath, matches[0].route, null, null, jobObj, null, 0, 0, true, matches.paramVals, routeChildrenFilter, skipHash).then(() => {
+            var resolveTime = Date.now();
+            console.log("Resolved " + colors.green(Object.keys(jobObj.queue).length) + " files to write in " + colors.magenta(parseTime(resolveTime - startTime)) + ". Starting file writes...");
+            return jobObj.write()
+                .then(() => {
+                    var writeTime = Date.now();
+                    console.log("Done writing files in " + colors.magenta(parseTime(writeTime - resolveTime)) + ". Job took " + colors.magenta(parseTime(writeTime - startTime)) + " in total.");
+
+                    if (!skipHash) {
+                        return fs.writeFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes' }), JSON.stringify(jobObj.hashes))
+                            .then(() => jobObj.output);
+                    } else {
+                        return jobObj.output;
+                    }
+                });
+        }).catch(err => {
+            console.error(colors.red(err), err.stack || '');
+            process.exit(1);
+        });
     }
 
     buildSite(outputPath) {
@@ -154,11 +200,12 @@ class WeddellStaticSiteGenerator {
                             console.log(Object.keys(templates).map(template => '\t' + colors.magenta(template)).join('\r\n'));
                         }
                         return jobObj.write()
-                            .then(() => {
+                            .then((output) => {
+                                console.log(output);
                                 var writeTime = Date.now();
                                 console.log("Done writing files in " + colors.magenta(parseTime(writeTime - resolveTime)) + ". Job took " + colors.magenta(parseTime(writeTime - startTime)) + " in total.");
                                 return fs.writeFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes' }), JSON.stringify(jobObj.hashes))
-                                    .then(() => jobObj)
+                                    .then(() => output)
                             });
                     })
                     .catch(err => {
@@ -168,11 +215,15 @@ class WeddellStaticSiteGenerator {
             });
     }
 
-    resolveTemplateFunction(templateFilePath) {
+    resolveTemplateFunction(templateFilePath, skipHash = false) {
         return this.constructor.compiledTemplates[templateFilePath] || (this.constructor.compiledTemplates[templateFilePath] = fs.readFile(templateFilePath, { encoding: 'utf8' })
             .then((contents) => {
                 var func = pug.compile(contents, defaults({ filename: templateFilePath }, this.pugOpts));
-                this.constructor.compiledTemplateHashes[templateFilePath] = crypto.createHash('md5').update(func.toString()).digest("hex");
+                
+                if (skipHash) {
+                    this.constructor.compiledTemplateHashes[templateFilePath] = crypto.createHash('md5').update(func.toString()).digest("hex");
+                }
+
                 return func;
             }))
     }
@@ -182,6 +233,13 @@ class WeddellStaticSiteGenerator {
         if (!resolver) throw "Failed to resolve entries for route " + routeName + " and param " + paramName;
 
         return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals, routeName) : resolver);
+    }
+
+    resolveSingleEntries(paramName, routeName, locals, paramVals) {
+        var resolver = this._resolveProperty('singleEntryResolvers', routeName, paramName, 'defaultEntryResolver');
+        if (!resolver) throw "Failed to resolve entries for route " + routeName + " and param " + paramName;
+
+        return Promise.resolve(typeof resolver === 'function' ? resolver.call(this, locals, routeName, paramVals) : resolver);
     }
 
     _resolveProperty(prop, routeName, paramName, fallbackProp) {
@@ -216,7 +274,7 @@ class WeddellStaticSiteGenerator {
         return (componentName && this.templateMap[componentName]) || this.defaultTemplatePath;
     }
 
-    writeFile(route, finalPath, locals, params, jobObj, outputPath) {
+    writeFile(route, finalPath, locals, params, jobObj, outputPath, buildSingleRoute, skipHash = false) {
         return (route.redirect ?
             Promise.reject(typeof route.redirect === 'function' ? route.redirect.call(this.router, { paramVals: params }) : route.redirect) :
             route.handler ? Promise.resolve(typeof route.handler === 'function' ? route.handler.call(this.router, { paramVals: params }) : route.handler) : null
@@ -240,7 +298,7 @@ class WeddellStaticSiteGenerator {
                 if (redirect && (redirectRoutes = this.router.matchRoute(redirect, this.routes))) {
                     jobObj.redirects.push({ from: finalPath, to: redirect });
                     locals = Object.assign(locals, { redirectTo: redirect });
-                    this.writeFile(redirectRoutes[redirectRoutes.length - 1].route, finalPath, locals, rejection.params, jobObj, outputPath);
+                    this.writeFile(redirectRoutes[redirectRoutes.length - 1].route, finalPath, locals, rejection.params, jobObj, outputPath, buildSingleRoute, skipHash);
                 } else {
                     return new Error(`Failed performing redirect: ${redirect}`);
                 }
@@ -251,23 +309,27 @@ class WeddellStaticSiteGenerator {
                 var fsFinalPath = path.join(outputPath, finalPath);
                 var filePath = path.format({ dir: fsFinalPath, base: 'index.html' });
 
-                return this.resolveTemplateFunction(templatePath)
+                return this.resolveTemplateFunction(templatePath, skipHash)
                     .then((templateFunc) => {
                         locals = Object.assign({ path: finalPath, route, router: this.router, params }, locals);
 
-                        var hash = crypto.createHash('md5').update(this.constructor.compiledTemplateHashes[templatePath] + '_' + JSON.stringify(locals)).digest("hex");
+                        if (!skipHash) {
+                            var hash = crypto.createHash('md5').update(this.constructor.compiledTemplateHashes[templatePath] + '_' + JSON.stringify(locals)).digest("hex");
 
-                        if (jobObj.hashes[filePath] === hash) {
-                            jobObj.filesSkipped.push(filePath);
-                            jobObj.pathsSkipped.push(fsFinalPath);
-                            jobObj.numFilesSkipped++;
-                            if (this.logLevel >= 1) {
-                                console.log(colors.green('Skipped file'), filePath);
+                            if (jobObj.hashes[filePath] === hash) {
+                                jobObj.filesSkipped.push(filePath);
+                                jobObj.pathsSkipped.push(fsFinalPath);
+                                jobObj.numFilesSkipped++;
+                                if (this.logLevel >= 1) {
+                                    console.log(colors.green('Skipped file'), filePath);
+                                }
+                                return Promise.resolve(true);
                             }
+    
+                            jobObj.hashes[filePath] = hash;
+                        } else {
                             return Promise.resolve(true);
                         }
-
-                        jobObj.hashes[filePath] = hash;
 
                         return Promise.resolve(this.localsTransform ? this.localsTransform(locals) : locals)
                             .then(locals => {
@@ -276,6 +338,17 @@ class WeddellStaticSiteGenerator {
                             .then(output => {
                                 if (this.logLevel >= 1) {
                                     console.log(colors.cyan('Writing file'), filePath);
+                                }
+
+                                if (buildSingleRoute) {
+                                    jobObj.pathsWritten.push(fsFinalPath);
+                                    jobObj.filesWritten.push(filePath);
+                                    jobObj.numFilesWritten++;
+                                    if (this.logLevel >= 1) {
+                                        console.log(colors.green('Wrote file'), filePath);
+                                    }
+                                    jobObj.output = output;
+                                    return Promise.resolve(true);
                                 }
 
                                 return mkdirp(fsFinalPath)
@@ -300,7 +373,7 @@ class WeddellStaticSiteGenerator {
             });
     }
 
-    buildEntry(tokens, locals, route, pathArr, outputPath, params, jobObj, routeIndex, depth) {
+    buildEntry(tokens, locals, route, pathArr, outputPath, params, jobObj, routeIndex, depth, buildSingleRoute = false, skipHash = false) {
         if (!route.name) throw "Route does not have a name - routes need names to be used with the static site generator: " + route.pattern;
 
         params = Object.assign({}, params, tokens.reduce((final, tok, ii) => {
@@ -321,12 +394,12 @@ class WeddellStaticSiteGenerator {
 
         if (matches) {
             if (matches[matches.length - 1].route === route) {
-                jobObj.enqueue(fullPath, routeIndex, depth, this.writeFile.bind(this, route, fullPath, locals, params, jobObj, outputPath));
+                jobObj.enqueue(fullPath, routeIndex, depth, this.writeFile.bind(this, route, fullPath, locals, params, jobObj, outputPath, buildSingleRoute, skipHash));
             }
         }
     }
 
-    buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj, prevTokens, routeIndex, depth) {
+    buildEntries(tokens, locals, route, pathArr, outputPath, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter = () => true, skipHash = false) {
         if (!pathArr) pathArr = [];
         if (!locals) locals = {};
 
@@ -338,7 +411,9 @@ class WeddellStaticSiteGenerator {
             if (typeof currToken === 'object') {
                 if (currToken.name) {
                     return Promise.all([
-                        this.resolveEntries(currToken.name, route.name, locals),
+                        buildSingleRoute ?
+                            this.resolveSingleEntries(currToken.name, route.name, locals, paramVals) :
+                            this.resolveEntries(currToken.name, route.name, locals),
                         this.resolveEntryLocalName(currToken.name, route.name, locals)
                     ])
                         .then(result => {
@@ -347,6 +422,8 @@ class WeddellStaticSiteGenerator {
                             if (!entries || !entryLocalName) {
                                 throw "Missing entries or entry local name for param '" + currToken.name + "'";
                             }
+
+                            entries = buildSingleRoute ? [entries] : entries;
 
                             return Promise.all(entries.map(entry => {
                                 var entryLocals = Object.assign({}, locals);
@@ -362,14 +439,14 @@ class WeddellStaticSiteGenerator {
                                     });
                             }))
                                 .then(entryObjs => {
-                                    if (currToken.optional && !entryObjs.some(obj => !obj.locals[currToken.name])) {
+                                    if (!buildSingleRoute && currToken.optional && !entryObjs.some(obj => !obj.locals[currToken.name])) {
                                         var newObj = {};
                                         newObj[currToken.name] = null;
                                         entryObjs.push({ locals: Object.assign(newObj, locals), pathSegment: null })
                                     }
 
                                     return Promise.all(entryObjs.map(obj => {
-                                        return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth)
+                                        return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter);
                                     }));
                                 })
                         });
@@ -377,12 +454,12 @@ class WeddellStaticSiteGenerator {
                     throw "No token name in path param '" + currToken + "'";
                 }
             } else if (typeof currToken === 'string') {
-                return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj, prevTokens, routeIndex, depth);
+                return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter);
             }
         } else {
             var promises = [];
             // if (typeof tokens[tokens.length - 1] === 'string') { Don't 100% remember why we were checking this. It was messing some things up.
-            promises.push(this.buildEntry(tokens, locals, route, pathArr, outputPath, params, jobObj, routeIndex, depth));
+            promises.push(this.buildEntry(tokens, locals, route, pathArr, outputPath, params, jobObj, routeIndex, depth, buildSingleRoute, skipHash));
             // }
 
             if (route.children) {
@@ -392,7 +469,7 @@ class WeddellStaticSiteGenerator {
                     }
                     return final;
                 }, {}));
-                promises = promises.concat(route.children.map((childRoute, ii) => this.compileRoute(outputPath, childRoute, locals, params, jobObj, prevTokens.concat(tokens), ii, depth + 1)));
+                promises = promises.concat(route.children.filter(routeChildrenFilter.bind(route)).map((childRoute, ii) => this.compileRoute(outputPath, childRoute, locals, params, jobObj, prevTokens.concat(tokens), ii, depth + 1, buildSingleRoute, paramVals, routeChildrenFilter, skipHash)));
             }
             return Promise.all(promises)
                 .then(() => jobObj);
