@@ -115,6 +115,7 @@ class WeddellStaticSiteGenerator {
         this.locals = opts.locals;
         this.localsTransform = opts.localsTransform;
         this.clean = opts.clean;
+        this.unnamedTokenEntryResolver = opts.unnamedTokenEntryResolver;
     }
 
     compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter = () => true, skipHash = false) {
@@ -451,7 +452,7 @@ class WeddellStaticSiteGenerator {
                                 })
                         });
                 } else {
-                    throw "No token name in path param '" + currToken + "'";
+                    return this.unnamedTokenEntryResolver ? this.unnamedTokenEntryResolver(currToken, tokens, pathArr) : Promise.resolve([]);
                 }
             } else if (typeof currToken === 'string') {
                 return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter);
