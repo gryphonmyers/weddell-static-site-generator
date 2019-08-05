@@ -414,15 +414,19 @@ class WeddellStaticSiteGenerator {
                 return Promise.all([
                     buildSingleRoute ?
                         this.resolveSingleEntries(currToken.name, route.name, locals, paramVals) :
-                        currToken.name ? this.resolveEntries(currToken.name, route.name, locals) : this.unnamedTokenEntriesResolver ? this.unnamedTokenEntriesResolver(currToken, route.name, locals) : [],
-                    currToken.name ? this.resolveEntryLocalName(currToken.name, route.name, locals) : null
+                        typeof currToken.name == 'string' ? 
+                            this.resolveEntries(currToken.name, route.name, locals) : 
+                            this.unnamedTokenEntriesResolver ? 
+                                this.unnamedTokenEntriesResolver(currToken, route.name, locals) : 
+                                [],
+                    typeof currToken.name == 'string' ? this.resolveEntryLocalName(currToken.name, route.name, locals) : currToken.name
                 ])
                     .then(([entries, entryLocalName]) => {
                         if (!entries) {
                             throw "Missing entries for param '" + currToken.name + "'";
                         }
 
-                        if (currToken.name && !entryLocalName) {
+                        if (currToken.name != null && entryLocalName == null) {
                             throw "Missing entries or entry local name for param '" + currToken.name + "'";
                         }
 
@@ -430,7 +434,7 @@ class WeddellStaticSiteGenerator {
 
                         return Promise.all(entries.map(entry => {
                             var entryLocals = Object.assign({}, locals);
-                            if (entryLocalName === currToken.name) {
+                            if (typeof currToken.name == 'string' && entryLocalName === currToken.name) {
                                 throw "Cannot set entry local name to be the same as the path var name: " + entryLocalName;
                             }
                             entryLocals[entryLocalName] = entry;
