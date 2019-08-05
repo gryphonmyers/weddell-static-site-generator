@@ -115,7 +115,8 @@ class WeddellStaticSiteGenerator {
         this.locals = opts.locals;
         this.localsTransform = opts.localsTransform;
         this.clean = opts.clean;
-        this.unnamedTokenEntryResolver = opts.unnamedTokenEntryResolver;
+        this.unnamedTokenEntriesResolver = opts.unnamedTokenEntriesResolver;
+        this.currentJob = null;
     }
 
     compileRoute(outputPath, route, locals, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter = () => true, skipHash = false) {
@@ -186,6 +187,7 @@ class WeddellStaticSiteGenerator {
                     .catch(() => { });
 
                 var jobObj = new Job({ hashes });
+                this.currentJob = jobObj;
                 return Promise.all(this.router.routes.map((route, ii) => this.compileRoute(outputPath, route, null, null, jobObj, null, ii, 0)))
                     .then(result => {
                         var resolveTime = Date.now();
@@ -202,7 +204,6 @@ class WeddellStaticSiteGenerator {
                         }
                         return jobObj.write()
                             .then((output) => {
-                                console.log(output);
                                 var writeTime = Date.now();
                                 console.log("Done writing files in " + colors.magenta(parseTime(writeTime - resolveTime)) + ". Job took " + colors.magenta(parseTime(writeTime - startTime)) + " in total.");
                                 return fs.writeFile(path.format({ dir: outputPath, base: '.weddellstaticsitehashes' }), JSON.stringify(jobObj.hashes))
@@ -410,50 +411,48 @@ class WeddellStaticSiteGenerator {
 
         if (currToken) {
             if (typeof currToken === 'object') {
-                if (currToken.name) {
-                    return Promise.all([
-                        buildSingleRoute ?
-                            this.resolveSingleEntries(currToken.name, route.name, locals, paramVals) :
-                            this.resolveEntries(currToken.name, route.name, locals),
-                        this.resolveEntryLocalName(currToken.name, route.name, locals)
-                    ])
-                        .then(result => {
-                            var entries = result[0];
-                            var entryLocalName = result[1];
-                            if (!entries || !entryLocalName) {
-                                throw "Missing entries or entry local name for param '" + currToken.name + "'";
+                return Promise.all([
+                    buildSingleRoute ?
+                        this.resolveSingleEntries(currToken.name, route.name, locals, paramVals) :
+                        currToken.name ? this.resolveEntries(currToken.name, route.name, locals) : this.unnamedTokenEntriesResolver ? this.unnamedTokenEntriesResolver(currToken, route.name, locals) : [],
+                    currToken.name ? this.resolveEntryLocalName(currToken.name, route.name, locals) : null
+                ])
+                    .then(([entries, entryLocalName]) => {
+                        if (!entries) {
+                            throw "Missing entries for param '" + currToken.name + "'";
+                        }
+
+                        if (currToken.name && !entryLocalName) {
+                            throw "Missing entries or entry local name for param '" + currToken.name + "'";
+                        }
+
+                        entries = buildSingleRoute ? [entries] : entries;
+
+                        return Promise.all(entries.map(entry => {
+                            var entryLocals = Object.assign({}, locals);
+                            if (entryLocalName === currToken.name) {
+                                throw "Cannot set entry local name to be the same as the path var name: " + entryLocalName;
                             }
+                            entryLocals[entryLocalName] = entry;
 
-                            entries = buildSingleRoute ? [entries] : entries;
-
-                            return Promise.all(entries.map(entry => {
-                                var entryLocals = Object.assign({}, locals);
-                                if (entryLocalName === currToken.name) {
-                                    throw "Cannot set entry local name to be the same as the path var name: " + entryLocalName;
+                            return this.resolvePathSegment(currToken.name, route.name, entryLocals)
+                                .then(pathSegment => {
+                                    entryLocals[currToken.name] = pathSegment;
+                                    return { locals: entryLocals, pathSegment };
+                                });
+                        }))
+                            .then(entryObjs => {
+                                if (!buildSingleRoute && currToken.optional && !entryObjs.some(obj => !obj.locals[currToken.name])) {
+                                    var newObj = {};
+                                    newObj[currToken.name] = null;
+                                    entryObjs.push({ locals: Object.assign(newObj, locals), pathSegment: null })
                                 }
-                                entryLocals[entryLocalName] = entry;
 
-                                return this.resolvePathSegment(currToken.name, route.name, entryLocals)
-                                    .then(pathSegment => {
-                                        entryLocals[currToken.name] = pathSegment;
-                                        return { locals: entryLocals, pathSegment };
-                                    });
-                            }))
-                                .then(entryObjs => {
-                                    if (!buildSingleRoute && currToken.optional && !entryObjs.some(obj => !obj.locals[currToken.name])) {
-                                        var newObj = {};
-                                        newObj[currToken.name] = null;
-                                        entryObjs.push({ locals: Object.assign(newObj, locals), pathSegment: null })
-                                    }
-
-                                    return Promise.all(entryObjs.map(obj => {
-                                        return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter);
-                                    }));
-                                })
-                        });
-                } else {
-                    return this.unnamedTokenEntryResolver ? this.unnamedTokenEntryResolver(currToken, tokens, pathArr) : Promise.resolve([]);
-                }
+                                return Promise.all(entryObjs.map(obj => {
+                                    return this.buildEntries(tokens, obj.locals, route, pathArr.concat(obj.pathSegment), outputPath, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter);
+                                }));
+                            })
+                    });
             } else if (typeof currToken === 'string') {
                 return this.buildEntries(tokens, locals, route, pathArr.concat(currToken), outputPath, params, jobObj, prevTokens, routeIndex, depth, buildSingleRoute, paramVals, routeChildrenFilter);
             }
